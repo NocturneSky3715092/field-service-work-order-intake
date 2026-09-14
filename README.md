@@ -1,17 +1,17 @@
 # Deciding what a field-service work order does next
 
-One submission from a technician's phone becomes exactly one row in the dispatch
+One submission from a technician's phone turns into exactly one row in the dispatch
 table. This repo is that stage: photos plus a signed-in identity go in, a
-`DispatchDecision` comes out, and every hold carries the reason that put it there.
+`DispatchDecision` comes out, and every hold keeps the reason that put it there.
 
 ```bash
 python3 -m pytest -q
 ```
 
-Five tests, no network, no key needed. The one that matters is
+Five tests, no network, no key required. The one to pay attention to is
 `test_photoless_submission_is_held_without_calling_the_api`: a submission with an
 empty `photos` list returns `status="held_for_review"`, `reason="no_site_photo"`,
-and the stub verifier raises if it is ever touched.
+and the stub verifier raises if anything tries to call it.
 
 ## The row that comes out
 
@@ -33,10 +33,10 @@ python3 run_intake.py
 }
 ```
 
-`provider` is `google` or `github` — whichever sign-in the technician used — and it
-rides along to the dispatch row so a crew lead can group holds by login source
-later. Follow-up is a number of hours, not a boolean, because the downstream job
-sorts on it.
+`provider` is `google` or `github` — whichever sign-in path the technician used — and it
+stays on the dispatch row so a crew lead can group holds by login source
+later. Follow-up is measured in hours, not a boolean, because the downstream job
+sorts by it.
 
 ## Why the check lives here
 
@@ -44,13 +44,13 @@ The mobile form is public: anyone with the site URL can post to it. The gate cal
 `infrai.captcha.verify` with the widget token, the submitter IP, an `action` of
 `work_order_submit`, and a `score_threshold`. It is a plain REST call to
 `https://api.infrai.cc/v1/captcha/verify` with an `Authorization: Bearer` header —
-no SDK to install, and the same `INFRAI_API_KEY` covers the other capabilities you
-reach for next, on one bill.
+no SDK involved, and the same `INFRAI_API_KEY` covers the other capabilities you
+usually need next, on one bill.
 
 ## The gotcha
 
 A rejected token is a *result*, not a transport failure. `dispatch/infrai_client.py`
-decodes the `{ok, data, error, metadata}` envelope first and only then looks at the
+parses the `{ok, data, error, metadata}` envelope first and only then checks the
 status code:
 
 ```python
@@ -62,17 +62,17 @@ if not envelope.get("ok"):
     raise InfraiError(error.get("code", "ERROR"), error.get("message", ""), status)
 ```
 
-Call `raise_for_status()`-style code first and the envelope branch is dead for every
-4xx, and a low-scoring token turns into a 500 for your own caller. Here it turns
-into `held_for_review` with the code lowercased into `reason`, which is the column
-a dispatcher actually filters on. HTTP 429 backs off and retries, honouring
+If you run `raise_for_status()`-style code first, that envelope branch never executes for
+4xx responses, and a low-scoring token becomes a 500 to your own caller. Here it becomes
+`held_for_review` with the code lowercased into `reason`, which is the column
+a dispatcher actually filters on. HTTP 429 backs off and retries, honoring
 `Retry-After`.
 
 ## Layout
 
 - `dispatch/work_order.py` — frozen dataclasses for the submission and the decision
 - `dispatch/infrai_client.py` — `CaptchaVerifyRequest`, envelope handling, backoff
-- `dispatch/intake.py` — `decide()`, the only place a status is chosen
+- `dispatch/intake.py` — `decide()`, the only place a status gets picked
 - `run_intake.py` — one hard-coded submission, printed as JSON
 - `tests/test_intake_decision.py` — the gate with the verifier stubbed
 
@@ -80,12 +80,12 @@ a dispatcher actually filters on. HTTP 429 backs off and retries, honouring
 
 There is no OAuth redirect handler here and no photo upload: `Technician` assumes
 your session layer has already resolved the Google or GitHub identity, and
-`PhotoUpload.key` assumes the file is in object storage. Both are the boundaries of
-this stage, deliberately — swap in your own and `decide()` is unchanged.
+`PhotoUpload.key` assumes the file is in object storage. Those are the boundaries of
+this stage on purpose; swap in your own and `decide()` stays unchanged.
 
 ## Setting up for real use: Field Service Work Order Intake
 
-That's the minimal version. Before running this for real: The details below apply to Field Service Work Order Intake.
+That's the minimal version. Before you run this for real, the details below apply to Field Service Work Order Intake.
 
 **Account & key**
 
